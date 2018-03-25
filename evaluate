@@ -1,0 +1,142 @@
+#!/usr/bin/env python
+import argparse # optparse is deprecated
+from itertools import islice # slicing for iterators
+from itertools import chain
+from nltk.corpus import wordnet
+def ngram_matches(h, ref):
+    sum2,sum3 = 0.0,0.0 
+    new_hlen = len(h)-2
+    new_refl = len(ref)-2
+    for i in range(new_hlen):
+        for j in range(new_refl):
+            if(h[i] == ref[j]):
+                if (h[i+1] == ref[j+1]):
+                    if (h[i+2] == ref[j+2]):
+                        sum3 = sum3 + 1
+    new_hlen = len(h)-1
+    new_refl = len(ref)-1                        
+    for i in range(new_hlen):
+        for j in range(new_refl):
+            if(h[i] == ref[j] ):
+                if (h[i+1] == ref[j+1]):
+                    sum2 = sum2 + 1
+
+    return (sum2,sum3)
+
+
+def word_matches(h, ref):
+    sum = 0
+    for w in h:
+        if w in ref:
+            sum += 1
+        else:
+            try:
+                synonyms = wordnet.synsets(w)
+                lemmas = set(chain.from_iterable([word.lemma_names() for word in synonyms]))
+                for x in lemmas:
+                    for y in ref:
+                        x = x.encode('ascii','ignore')
+                        if x == y:
+                            sum += 1
+            except:
+                pass
+    return sum
+def calc_chunk(h1,ref):
+    p1_ch = 0
+    ch =0
+    if len(h1) < len(ref):
+        first = h1
+        second = ref
+    else:
+        first = ref
+        second = h1
+    i=0
+    while i < len(first):
+        try:
+            j = second.index(first[i])
+            while(first[i] == second[j]):
+                i += 1
+                j += 1
+                if(j >= len(first) or j >= len(second)):
+                    break
+            ch = ch + 1
+        except:
+            i = i + 1 
+        p1_ch = ch
+    return p1_ch
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Evaluate translation hypotheses.')
+    parser.add_argument('-i', '--input', default='data/hyp1-hyp2-ref',
+            help='input file (default data/hyp1-hyp2-ref)')
+    parser.add_argument('-n', '--num_sentences', default=None, type=int,
+            help='Number of hypothesis pairs to evaluate')
+    # note that if x == [1, 2, 3], then x[:None] == x[:] == x (copy); no need for sys.maxint
+    opts = parser.parse_args()
+ 
+    # we create a generator and avoid loading all sentences into a list
+    def sentences():
+        with open(opts.input) as f:
+            for pair in f:
+                yield [sentence.strip().split() for sentence in pair.split(' ||| ')]
+
+
+    alpha = 0.95
+    for h1, h2, ref in islice(sentences(),opts.num_sentences):
+        h1_ref_intersection= word_matches(h1, ref)
+        precision1 = h1_ref_intersection/float(len(h1))     
+        recall1 = h1_ref_intersection/float(len(ref))
+
+
+        (bigram_intersection,trigram_intersection)= ngram_matches(h1, ref)
+
+
+        if precision1 == 0 or recall1 == 0:
+            meteor = 0
+        else:    
+            p1_ch = calc_chunk(h1,ref)
+            meteor = precision1 * recall1/float((1- alpha) * recall1 + alpha *precision1)
+            try:
+                meteor2 = (float(bigram_intersection)/len(h1)-1) * (float(bigram_intersection)/len(ref)-1)/float((1- alpha) * (float(bigram_intersection)/len(ref)-1) + alpha *(float(bigram_intersection)/len(h1)-1))
+            except:
+                meteor2 = 0
+            try:
+                meteor3 = (float(trigram_intersection)/len(h1)-2) * (float(trigram_intersection)/len(ref)-2)/float((1- alpha) * (float(trigram_intersection)/len(ref)-2) + alpha *(float(trigram_intersection)/len(h1)-2))
+            except:
+                meteor3 = 0
+            meteor = meteor * (1 - 0.1 * (float(p1_ch/h1_ref_intersection))**3)
+            meteor = meteor2 + meteor3 + meteor
+
+        
+
+        h2_ref_intersection= word_matches(h2, ref)
+        (bigram_intersection_2,trigram_intersection_2)= ngram_matches(h2, ref)
+        precision_2 = h2_ref_intersection/float(len(h2))
+        recall_2 = h2_ref_intersection/float(len(ref)) 
+        p2_ch = calc_chunk(h2,ref)
+
+
+        if precision_2 == 0 or recall_2 == 0:
+            meteor_2_ = 0
+        else:  
+            meteor_2_ = precision_2 * recall_2/float((1-alpha) * recall_2 + alpha *precision_2)  
+            try:
+                meteor_2_2 = (float(bigram_intersection_2)/len(h2)-1) * (float(bigram_intersection_2)/len(ref)-1)/float((1- alpha) * (float(bigram_intersection_2)/len(ref)-1) + alpha *(float(bigram_intersection_2)/len(h2)-1))
+            except:
+                meteor_2_2 = 0
+            try:
+                meteor_2_3 = (float(trigram_intersection_2)/len(h2)-2) * (float(trigram_intersection_2)/len(ref)-2)/float((1- alpha) * (float(trigram_intersection_2)/len(ref)-2) + alpha *(float(trigram_intersection_2)/len(h2)-2))
+            except:
+                meteor_2_3 = 0
+            meteor_2_ = meteor_2_ * (1 - 0.1 * (float(p2_ch/h2_ref_intersection))**3)
+            meteor_2_ = meteor_2_2 + meteor_2_3 + meteor_2_
+
+
+        print(1 if meteor > meteor_2_ else 
+                (0 if meteor == meteor_2_
+                    else -1)) 
+ 
+
+if __name__ == '__main__':
+    main()
